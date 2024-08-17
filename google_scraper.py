@@ -1,172 +1,180 @@
 import pandas as pd
-
-from bs4 import BeautifulSoup
-
-# from webscraping import ArticleScraper
-
-from selenium import webdriver 
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import InvalidArgumentException, WebDriverException
-# from selenium.webdriver.common.action_chains import ActionChains 
-# from selenium.webdriver.common.keys import Keys
+from bs4 import BeautifulSoup
 
 class Scraper:
+    """Base scraper class for web scraping tasks using Selenium."""
 
     def __init__(self):
+        """Initializes the scraper with basic configurations."""
         self.initialize()
-        # self.open_webdriver()
-
+    
     def initialize(self):
+        """Resets the internal state of the scraper."""
         self.results = []
         self.html = []
         self.merged = []
 
-
     def open_webdriver(self):
+        """Opens a Chrome WebDriver session with specific options."""
         options = webdriver.ChromeOptions()
         options.page_load_strategy = 'none'
-        # options.add_argument('headless')
-        # options.add_argument('window-size=640x480')
-        # options.add_argument("disable-gpu")
         options.add_argument("--window-size=320,240")
-        # options.add_argument('--headless')
-        # options.add_argument('--log-level=3')
         options.add_argument('--disable-gpu')
         options.add_argument('--disable-infobars')
-        options.add_argument('--blink-settings=imagesEnabled=false') #브라우저에서 이미지 로딩을 하지 않습니다.
-        options.add_argument('--mute-audio') #브라우저에 음소거 옵션을 적용합니다.
-        options.add_argument('incognito') #시크릿 모드의 브라우저가 실행됩니다.
-        # 알림창 끄기
+        options.add_argument('--blink-settings=imagesEnabled=false')
+        options.add_argument('--mute-audio')
+        options.add_argument('incognito')
         options.add_experimental_option("prefs", {
             "profile.default_content_setting_values.notifications": 1
         })
+
         self.webdriver = webdriver.Chrome(options=options)
         self.wait = WebDriverWait(self.webdriver, 30)
 
-
     def close_webdriver(self):
-        self.webdriver.close()
-        self.webdriver.quit()
+        """Closes the WebDriver session."""
+        if self.webdriver:
+            self.webdriver.quit()
 
-    def get_html(
-        self,
-        url: str
-    ) -> str:
+    def get_html(self, url: str) -> str:
+        """
+        Retrieves the HTML content of the specified URL.
+
+        Args:
+            url (str): The URL to retrieve the HTML from.
+
+        Returns:
+            str: The HTML content of the page.
+        """
         try:
             self.webdriver.get(url)
-            element = self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             html = self.webdriver.page_source
             self.webdriver.execute_script("window.stop();")
             return html
-        
-        except InvalidArgumentException as e:
-            print(f"Invalid argument exception: {e}")
-            return ""
-    
-        except WebDriverException as e:
-            print(f"WebDriverException: {e}")
-            return ""
-    
-        finally:
-            pass
 
+        except (InvalidArgumentException, WebDriverException) as e:
+            print(f"Exception occurred: {e}")
+            return ""
 
-    def append_info(self):
-        html = self.webdriver.page_source
+    def append_info(self, html: str):
+        """
+        Appends the extracted information from the HTML content.
+
+        Args:
+            html (str): The HTML content to extract information from.
+        """
         self.html.append(html)
-        res = get_info(html)
+        res = self.get_info(html)
         self.results.append(res)
-    
 
-    def get_pages(self, query, page_num=100):
-        pass
+    def get_pages(self, query: str, page_num: int = 100):
+        """Placeholder method to be overridden by subclasses."""
+        raise NotImplementedError("Subclasses must implement this method.")
 
+    def extract_tags(self, html: str):
+        """Placeholder method to be overridden by subclasses."""
+        raise NotImplementedError("Subclasses must implement this method.")
 
-    def extract_tags(self):
-        pass
-
-    
-    def get_info(self):
-        pass
-
+    def get_info(self, html: str):
+        """Placeholder method to be overridden by subclasses."""
+        raise NotImplementedError("Subclasses must implement this method.")
 
     def make_dataframe(self):
-        for pages in self.results:
-            for item in pages:
-                self.merged.append(item)
+        """Converts the scraped results into a pandas DataFrame."""
+        self.merged = [item for pages in self.results for item in pages]
         self.df = pd.DataFrame(self.merged)
 
-    def save_csv(self, file_path="./results.csv"):
-        self.df.to_csv(file_path, index=False)
-
-
+    def save_csv(self, file_path: str = "./results.csv"):
+        """Saves the DataFrame to a CSV file."""
+        if hasattr(self, 'df'):
+            self.df.to_csv(file_path, index=False)
+        else:
+            print("No data available to save. Please run the scraper first.")
 
 class GoogleScraper(Scraper):
-    
-    def get_pages(self, query, page_num=100):
+    """Scraper class specifically for extracting information from Google search results."""
+
+    def get_pages(self, query: str, page_num: int = 100):
+        """
+        Retrieves multiple pages of Google search results.
+
+        Args:
+            query (str): The search query URL.
+            page_num (int, optional): The number of pages to scrape. Defaults to 100.
+        """
         self.webdriver.get(query)
         process = True
         next_page = False
-        while process:
+
+        while process and len(self.html) < page_num:
             if next_page:
-                elem = self.webdriver.find_element(By.XPATH, '//*[@id="pnnext"]')
-                elem.click()
-            else:
-                next_page = True
+                next_btn = self.webdriver.find_element(By.XPATH, '//*[@id="pnnext"]')
+                next_btn.click()
 
             try:
-                wait = WebDriverWait(self.webdriver, 5)
-                # wait.until(EC.staleness_of(elem))
-                wait.until(EC.presence_of_all_elements_located((By.XPATH, '//*[@id="pnnext"]')))
+                self.wait.until(EC.presence_of_all_elements_located((By.XPATH, '//*[@id="pnnext"]')))
+                next_page = True
             except:
                 process = False
             finally:
                 html = self.webdriver.page_source
-                self.html.append(html)
-                res = self.get_info(html)
-                self.results.append(res)
-        # self.close_webdriver()
+                self.append_info(html)
 
+    def extract_tags(self, elements):
+        """
+        Extracts relevant tags from search result elements.
 
-    def extract_tags(self, a):
-        exts = []
-    
-        for item in a:
+        Args:
+            elements (list): List of anchor tag elements from the search results.
+
+        Returns:
+            list: A list of dictionaries containing extracted information.
+        """
+        extracted = []
+
+        for element in elements:
             info = {}
-        
-            link = item['href']
+            link = element.get('href')
+
             if len(link) > 5:
-                # print(link)
                 info['link'] = link
-                
-                h3 = item.find('h3')
-                if h3 != None:
-                    # print(h3.text)
+
+                h3 = element.find('h3')
+                if h3:
                     info['title'] = h3.text
-                else:
-                    continue
-            
-                span = item.find_all('span')
+
+                span = element.find_all('span')
                 for item_span, item_name in zip(span, ['', 'author', 'category']):
-                # for item_span in span:
-                    if len(item_span.text) > 0:
-                        # print(item_span.text)
+                    if item_span.text:
                         info[item_name] = item_span.text
-            
-                # print()
-                exts.append(info)
-        return exts
-    
-    
-    def get_info(self, html):
+
+                extracted.append(info)
+        return extracted
+
+    def get_info(self, html: str):
+        """
+        Extracts information from the HTML content of a Google search result page.
+
+        Args:
+            html (str): The HTML content of the page.
+
+        Returns:
+            list: A list of dictionaries containing the extracted information.
+        """
         soup = BeautifulSoup(html, 'html.parser')
-        id_search = soup.find(attrs={'id':'search'})
-        a = id_search.find_all('a')
-        exts = self.extract_tags(a)
-        desc = id_search.find_all('div', {'style':"-webkit-line-clamp:2"})
-        for item, ext in zip(desc, exts):
-            ext['desc'] = item.text
-            # print(item.text)
-        return exts
+        search_results = soup.find(attrs={'id': 'search'})
+        anchor_tags = search_results.find_all('a')
+
+        extracted_info = self.extract_tags(anchor_tags)
+        descriptions = search_results.find_all('div', {'style': "-webkit-line-clamp:2"})
+
+        for description, info in zip(descriptions, extracted_info):
+            info['desc'] = description.text
+
+        return extracted_info

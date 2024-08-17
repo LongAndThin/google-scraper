@@ -1,0 +1,4 @@
+{
+    "query": "서울 AND (폐관 OR 종료 OR 예산삭감) after:YEAR-01-01 before:YEAR-12-31",
+    "year": 2014
+}
